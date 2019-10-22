@@ -265,48 +265,67 @@ namespace UnityDebug
             Log.Write($"UnityDebug: Searching for Unity process '{name}'");
             SendOutput("stdout", "UnityDebug: Searching for Unity process '" + name + "'");
 
-            var processes = UnityAttach.GetAttachableProcesses(name).ToArray();
-
-            if (processes.Length == 0)
+            int id;
+            if (name.Contains("Editor"))
             {
-                Log.Write($"Could not find target name '{name}'.");
-                SendErrorResponse(response, 8001, "Could not find target name '{_name}'. Is it running?", new { _name = name });
-                return;
-            }
+                string pathToEditorInstanceJson = GetString(args, "path");
+                pathToEditorInstanceJson = CleanPath(pathToEditorInstanceJson);
+                if (File.Exists(pathToEditorInstanceJson))
+                {
+                    var jObject = JObject.Parse(File.ReadAllText(pathToEditorInstanceJson.TrimStart('/')));
+                    id = jObject["process_id"].ToObject<int>();
+                }
+                else
+                {
+                    var player = FindProcess(name);
+                    if (player == null)
+                    {
+                        return;
+                    }
 
-            UnityProcessInfo process;
-            if (processes.Length == 1)
-            {
-                process = processes[0];
+                    name = player.Name;
+                    id = player.Id;
+                }
             }
             else
             {
-                if (!name.Contains("Editor"))
+                var player = FindProcess(name);
+                if (player == null)
                 {
-                    TooManyInstances(response, name, processes);
                     return;
                 }
 
-                string pathToEditorInstanceJson = GetString(args, "path");
-                pathToEditorInstanceJson = CleanPath(pathToEditorInstanceJson);
-                if (!File.Exists(pathToEditorInstanceJson))
-                {
-                    TooManyInstances(response, name, processes);
-                    return;
-                }
-
-                var jObject = JObject.Parse(File.ReadAllText(pathToEditorInstanceJson.TrimStart('/')));
-                var processId = jObject["process_id"].ToObject<int>();
-                process = processes.First(p => p.Id == processId);
+                name = player.Name;
+                id = player.Id;
             }
 
-            var attachInfo = UnityProcessDiscovery.GetUnityAttachInfo(process.Id, ref unityDebugConnector);
+            var attachInfo = UnityProcessDiscovery.GetUnityAttachInfo(id, ref unityDebugConnector);
 
             Connect(attachInfo.Address, attachInfo.Port);
 
-            Log.Write($"UnityDebug: Attached to Unity process '{process.Name}' ({process.Id})");
-            SendOutput("stdout", "UnityDebug: Attached to Unity process '" + process.Name + "' (" + process.Id + ")\n");
+            Log.Write($"UnityDebug: Attached to Unity process '{name}' ({id})");
+            SendOutput("stdout", "UnityDebug: Attached to Unity process '" + name + "' (" + id + ")\n");
             SendResponse(response);
+        }
+
+        UnityProcessInfo FindProcess(string name)
+        {
+            var processes = UnityAttach.GetAttachableProcesses(name).ToArray();
+
+            if (processes.Length <= 0)
+            {
+                Log.Write($"Could not find target name '{name}'.");
+                SendErrorResponse(response, 8001, "Could not find target name '{_name}'. Is it  running?", new { _name = name });
+                return null;
+            }
+
+            if (processes.Length > 1)
+            {
+                TooManyInstances(response, name, processes);
+                return null;
+            }
+
+            return processes[0];
         }
 
         static string CleanPath(string pathToEditorInstanceJson)
